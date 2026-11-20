@@ -1,4 +1,4 @@
-﻿/*
+/*
  * doc2ai self-test: builds sample documents in memory and converts them.
  * Run with:  node tests/selftest.cjs
  */
@@ -173,7 +173,10 @@ BT /F1 11 Tf 72 690 Td (This PDF was generated for the doc2ai self test.) Tj ET
 BT /F1 11 Tf 72 675 Td (It contains two paragraphs of body text.) Tj ET
 BT /F1 14 Tf 72 640 Td (Key Findings) Tj ET
 BT /F1 11 Tf 72 620 Td (Revenue increased by eighteen percent this year.) Tj ET
-BT /F1 11 Tf 72 605 Td [(Bullet one) -300 (with a gap) -600 (and another)] TJ ET`;
+BT /F1 11 Tf 72 605 Td [(Bullet one) -300 (with a gap) -600 (and another)] TJ ET
+BT /F1 11 Tf 72 580 Td (Table of Contents) Tj ET
+BT /F1 11 Tf 72 560 Td (1. Overview ................................ 2) Tj ET
+BT /F1 11 Tf 72 540 Td (1.1. Scope ................................ 3) Tj ET`;
 
   let streamBytes;
   let dict;
@@ -299,8 +302,8 @@ const CASES = [
   ['report.docx', makeDocx(), ['# Quarterly Operations Report', '# Overview', '**18%**', '1. Opened 4 regional hubs', '| Region | Revenue | Growth |', 'North']],
   ['book.xlsx', makeXlsx(), ['## Sheet: Sales', '| Product | Units | Revenue |', '2025-01-01', 'Widget', '## Sheet: Notes', 'Ship by Friday.']],
   ['deck.pptx', makePptx(), ['## Slide 1 — Launch Plan', '- Ship the beta in March', '  - Invite 50 users', '| Metric | Value |', 'Speaker notes']],
-  ['plain.pdf', makePdf(false), ['# Annual Summary', 'eighteen percent', 'Bullet one with a gap']],
-  ['zipped.pdf', makePdf(true), ['# Annual Summary', 'eighteen percent']],
+  ['plain.pdf', makePdf(false), ['# Annual Summary', 'eighteen percent', 'Bullet one with a gap', '## Table of Contents', '- 1. Overview ... 2', '  - 1.1. Scope ... 3']],
+  ['zipped.pdf', makePdf(true), ['# Annual Summary', 'eighteen percent', '## Table of Contents', '- 1. Overview ... 2']],
   ['modern.pdf', makeModernPdf(), ['ABCD', 'fi']],
   ['bundle.zip', makeZipOfDocs(), ['inner/one.csv', '| a | b |', '# Inner Doc']],
   ['charter.odt', makeOdt(), ['# Project Charter', '- Goal one', '| Owner | Role |']],

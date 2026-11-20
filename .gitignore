@@ -17,5 +17,6 @@ desktop.ini
 # logs
 *.log
 npm-debug.log*
+document-to-ai-readable-converter.json
 
 .vercel

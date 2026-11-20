@@ -535,7 +535,51 @@
     return out;
   }
 
-  var cp1252 = new TextDecoder('windows-1252');
+  /* Legacy single-byte encodings. TextDecoder covers them natively in modern
+     browsers and Node; the tables below are the fallback. */
+  var decoderCache = {};
+
+  function decoderFor(label) {
+    if (decoderCache[label] !== undefined) return decoderCache[label];
+    var d = null;
+    try { d = new TextDecoder(label); } catch (e) { d = null; }
+    decoderCache[label] = d;
+    return d;
+  }
+
+  var MAC_ROMAN_HIGH =
+    '\u00c4\u00c5\u00c7\u00c9\u00d1\u00d6\u00dc\u00e1\u00e0\u00e2\u00e4\u00e3\u00e5\u00e7\u00e9\u00e8' +
+    '\u00ea\u00eb\u00ed\u00ec\u00ee\u00ef\u00f1\u00f3\u00f2\u00f4\u00f6\u00f5\u00fa\u00f9\u00fb\u00fc' +
+    '\u2020\u00b0\u00a2\u00a3\u00a7\u2022\u00b6\u00df\u00ae\u00a9\u2122\u00b4\u00a8\u2260\u00c6\u00d8' +
+    '\u221e\u00b1\u2264\u2265\u00a5\u00b5\u2202\u2211\u220f\u03c0\u222b\u00aa\u00ba\u03a9\u00e6\u00f8' +
+    '\u00bf\u00a1\u00ac\u221a\u0192\u2248\u2206\u00ab\u00bb\u2026\u00a0\u00c0\u00c3\u00d5\u0152\u0153' +
+    '\u2013\u2014\u201c\u201d\u2018\u2019\u00f7\u25ca\u00ff\u0178\u2044\u20ac\u2039\u203a\ufb01\ufb02' +
+    '\u2021\u00b7\u201a\u201e\u2030\u00c2\u00ca\u00c1\u00cb\u00c8\u00cd\u00ce\u00cf\u00cc\u00d3\u00d4' +
+    '\uf8ff\u00d2\u00da\u00db\u00d9\u0131\u02c6\u02dc\u00af\u02d8\u02d9\u02da\u00b8\u02dd\u02db\u02c7';
+
+  function decodeByte(c, encoding) {
+    if (encoding === 'WinAnsiEncoding') {
+      var w = decoderFor('windows-1252');
+      if (w) return w.decode(new Uint8Array([c]));
+      return String.fromCharCode(c);
+    }
+    if (encoding === 'MacRomanEncoding') {
+      if (c < 0x80) return String.fromCharCode(c);
+      var m = decoderFor('macintosh');
+      if (m) return m.decode(new Uint8Array([c]));
+      return MAC_ROMAN_HIGH.charAt(c - 0x80) || String.fromCharCode(c);
+    }
+    return String.fromCharCode(c);
+  }
+
+  var LIGATURES = {
+    '\ufb00': 'ff', '\ufb01': 'fi', '\ufb02': 'fl', '\ufb03': 'ffi',
+    '\ufb04': 'ffl', '\ufb05': 'st', '\ufb06': 'st'
+  };
+
+  function normalizeLigatures(text) {
+    return text.replace(/[\ufb00-\ufb06]/g, function (ch) { return LIGATURES[ch] || ch; });
+  }
 
   function buildFonts(doc, resources) {
     var fonts = {};
@@ -567,6 +611,24 @@
         var be = doc.nameOf(enc.v.BaseEncoding);
         if (be) info.baseEncoding = be;
       }
+
+      // Glyph advance widths, used to place spaces when a PDF positions every
+      // word with its own text matrix.
+      var widthsNode = doc.resolve(font.v.Widths);
+      if (widthsNode && widthsNode.t === 'arr') {
+        var firstChar = font.v.FirstChar && font.v.FirstChar.t === 'num' ? font.v.FirstChar.v : 0;
+        var wmap = {};
+        widthsNode.v.forEach(function (w, idx) {
+          var wd = doc.resolve(w);
+          if (wd && wd.t === 'num') wmap[firstChar + idx] = wd.v;
+        });
+        info.widths = wmap;
+      }
+      var desc = doc.resolve(font.v.FontDescriptor);
+      if (desc && desc.t === 'dict' && desc.v.MissingWidth && desc.v.MissingWidth.t === 'num') {
+        info.defaultWidth = desc.v.MissingWidth.v;
+      }
+
       fonts[key] = info;
     });
     return fonts;
@@ -591,16 +653,15 @@
         var last = str.charCodeAt(str.length - 1);
         if (font.cmap && font.cmap.has(last)) out += font.cmap.get(last);
       }
-      return out;
+      return normalizeLigatures(out);
     }
     for (var k = 0; k < str.length; k++) {
       var c = str.charCodeAt(k) & 0xff;
       if (font.cmap && font.cmap.has(c)) { out += font.cmap.get(c); continue; }
       if (font.differences && font.differences[c] !== undefined) { out += font.differences[c]; continue; }
-      if (font.baseEncoding === 'WinAnsiEncoding') out += cp1252.decode(new Uint8Array([c]));
-      else out += String.fromCharCode(c);
+      out += decodeByte(c, font.baseEncoding);
     }
-    return out;
+    return normalizeLigatures(out);
   }
 
   async function extractPageText(doc, page) {
@@ -625,7 +686,14 @@
       if (f.cmap) {
         try { cmap = parseCMap(await doc.streamText(f.cmap)); } catch (e) { cmap = null; }
       }
-      fontData[keys[k]] = { cmap: cmap, twoByte: f.twoByte, differences: f.differences, baseEncoding: f.baseEncoding };
+      fontData[keys[k]] = {
+        cmap: cmap,
+        twoByte: f.twoByte,
+        differences: f.differences,
+        baseEncoding: f.baseEncoding,
+        widths: f.widths || null,
+        defaultWidth: f.defaultWidth || 500
+      };
     }
 
     var lines = [];
@@ -637,9 +705,15 @@
     var fontSize = 12;
     var font = null;
     var tm = [1, 0, 0, 1, 0, 0];
+    var tmScale = 1;
+    var ctmScale = 1;
+
+    function effectiveSize() {
+      return (fontSize || 12) * tmScale * ctmScale;
+    }
 
     function flush() {
-      if (buf.trim()) lines.push({ text: buf.replace(/\s+$/, ''), size: bufSize || fontSize, y: curY });
+      if (buf.trim()) lines.push({ text: buf.replace(/\s+$/, ''), size: bufSize || effectiveSize(), y: curY });
       buf = '';
     }
 
@@ -649,8 +723,16 @@
       if (buf && Math.abs(curY - (lines.length ? lines[lines.length - 1].y : curY)) > fontSize * 40) {
         // far jump: nothing to do, keep simple
       }
-      if (!buf) bufSize = fontSize;
+      if (!buf) bufSize = effectiveSize();
       buf += txt;
+      var eff = effectiveSize();
+      var w = 0;
+      for (var ci = 0; ci < txt.length; ci++) {
+        var code = txt.charCodeAt(ci);
+        var gw = font && font.widths && font.widths[code] !== undefined ? font.widths[code] : (font && font.defaultWidth ? font.defaultWidth : 500);
+        w += (gw / 1000) * eff;
+      }
+      curX += w;
     }
 
     var i2 = 0;
@@ -699,9 +781,9 @@
       switch (op) {
         case 'BT':
           tm = [1, 0, 0, 1, 0, 0];
+          tmScale = 1;
           break;
         case 'ET':
-          flush();
           break;
         case 'Tf': {
           var nameNode = pending[pending.length - 2];
@@ -729,13 +811,50 @@
         }
         case 'Tm': {
           if (pending.length >= 6) {
+            var ta = pending[pending.length - 6];
+            var tb = pending[pending.length - 5];
+            var tc = pending[pending.length - 4];
+            var td = pending[pending.length - 3];
             var e = pending[pending.length - 2];
             var f = pending[pending.length - 1];
+            if (ta && ta.t === 'num' && td && td.t === 'num') {
+              var tvb = tb && tb.t === 'num' ? tb.v : 0;
+              var tvc = tc && tc.t === 'num' ? tc.v : 0;
+              var s1 = Math.sqrt(ta.v * ta.v + tvb * tvb);
+              var s2 = Math.sqrt(tvc * tvc + td.v * td.v);
+              tmScale = Math.max(s1, s2) || 1;
+            }
             if (f && f.t === 'num') {
               if (Math.abs(f.v - curY) > 0.5 && buf.trim()) flush();
               curY = f.v;
             }
-            if (e && e.t === 'num') curX = e.v;
+            if (e && e.t === 'num') {
+              var newX = e.v;
+              if (buf && !buf.endsWith(' ') && Math.abs((f && f.t === 'num' ? f.v : curY) - curY) <= 0.5) {
+                var eff = effectiveSize();
+                var gap = newX - curX;
+                if (gap > eff * 0.22) {
+                  buf += ' ';
+                }
+              }
+              curX = newX;
+            }
+          }
+          break;
+        }
+        case 'cm': {
+          if (pending.length >= 6) {
+            var ca = pending[pending.length - 6];
+            var cb = pending[pending.length - 5];
+            var cc = pending[pending.length - 4];
+            var cd = pending[pending.length - 3];
+            if (ca && ca.t === 'num' && cd && cd.t === 'num') {
+              var cvb = cb && cb.t === 'num' ? cb.v : 0;
+              var cvc = cc && cc.t === 'num' ? cc.v : 0;
+              var cs1 = Math.sqrt(ca.v * ca.v + cvb * cvb);
+              var cs2 = Math.sqrt(cvc * cvc + cd.v * cd.v);
+              ctmScale = Math.max(cs1, cs2) || 1;
+            }
           }
           break;
         }
@@ -804,6 +923,23 @@
     var para = '';
     var prev = null;
 
+    /* Learn the dominant line spacing of this page: body text uses it, paragraph
+       gaps are larger. This keeps double-spaced PDFs from turning into one
+       paragraph per line. */
+    var gapFreq = {};
+    for (var gi = 1; gi < lines.length; gi++) {
+      var g = Math.abs(lines[gi - 1].y - lines[gi].y);
+      if (g > 0 && g < median * 4) {
+        var gk = Math.round(g * 2) / 2;
+        gapFreq[gk] = (gapFreq[gk] || 0) + 1;
+      }
+    }
+    var leading = median * 1.2;
+    var bestGap = 0;
+    Object.keys(gapFreq).forEach(function (k) {
+      if (gapFreq[k] > bestGap) { bestGap = gapFreq[k]; leading = parseFloat(k); }
+    });
+
     function flushPara() {
       if (para.trim()) blocks.push(U.mdParagraph(para));
       para = '';
@@ -815,7 +951,8 @@
       var size = Math.round(line.size * 2) / 2;
 
       var headingLevel = 0;
-      if (size >= median * 1.7 && text.length < 140) headingLevel = 1;
+      if (/^(table of contents|contents|overview|abstract|executive summary|index)$/i.test(text)) headingLevel = 2;
+      else if (size >= median * 1.7 && text.length < 140) headingLevel = 1;
       else if (size >= median * 1.32 && text.length < 160) headingLevel = 2;
       else if (size >= median * 1.12 && text.length < 200 && !/[.;:,]$/.test(text)) headingLevel = 3;
 
@@ -826,24 +963,78 @@
         return;
       }
 
-      var bullet = /^([\u2022\u25cf\u25aa\u25e6\u00b7\u2013\u2014\-*]|\d{1,2}[.)])\s+/.exec(text);
+      var isToc = /(\.[\s.]*){3,}\s*(\d+|[ivxlcdm]+)\s*$/i.test(text);
+      if (isToc) {
+        flushPara();
+        var clean = text.replace(/\s*(\.[\s.]*){3,}\s*(\d+|[ivxlcdm]+)\s*$/i, ' ... $2');
+        var sm = /^(\d+(?:\.\d+)*)\.?\s+(.*)$/.exec(clean);
+        if (sm) {
+          var sec = sm[1];
+          var rest = sm[2];
+          var depth = (sec.match(/\./g) || []).length;
+          var indent = '  '.repeat(depth);
+          blocks.push(indent + '- ' + sec + '. ' + rest);
+        } else {
+          blocks.push('- ' + clean);
+        }
+        prev = null;
+        return;
+      }
+
+      var secNum = /^(\d{1,3}(?:\.\d{1,3})+)\.?\s+(.*)$/.exec(text);
+      if (secNum && text.length < 120 && !/[;:,]$/.test(text)) {
+        flushPara();
+        var secDepth = (secNum[1].match(/\./g) || []).length;
+        var lvl = Math.min(6, Math.max(2, secDepth + 1));
+        blocks.push(U.mdHeading(text, lvl));
+        prev = null;
+        return;
+      }
+
+      var bullet = /^([\u2022\u25cf\u25aa\u25e6\u00b7\u2013\u2014\-*]|\d{1,3}[.)])\s+/.exec(text);
       if (bullet) {
         flushPara();
-        blocks.push(/^\d{1,2}[.)]/.test(text) ? text.replace(/^(\d{1,2})[.)]\s+/, '$1. ') : '- ' + text.replace(/^([\u2022\u25cf\u25aa\u25e6\u00b7\u2013\u2014\-*])\s+/, ''));
+        blocks.push(/^\d{1,3}[.)]/.test(text) ? text.replace(/^(\d{1,3})[.)]\s+/, '$1. ') : '- ' + text.replace(/^([\u2022\u25cf\u25aa\u25e6\u00b7\u2013\u2014\-*])\s+/, ''));
         prev = line;
         return;
       }
 
       if (!para) { para = text; prev = line; return; }
+
       var gap = Math.abs((prev ? prev.y : line.y) - line.y);
-      var joinable = gap < median * 1.9 && !/[.!?:;]$/.test(para) && !/^[A-Z0-9(\u2022]/.test(text) && para.length > 20;
+      var endsSentence = /[.!?:;]$/.test(para);
+      var startsUpper = /^[A-Z0-9(\u2022\u201c"']/.test(text);
+
+      // Same paragraph when the line follows at (or near) the document's own
+      // leading. A sentence end plus a capitalised next line and extra space is
+      // a paragraph break; anything wider than ~1.5 leadings is one too.
+      var joinable;
+      if (gap <= leading * 1.15) joinable = true;
+      else if (gap <= leading * 1.6) joinable = !(endsSentence && startsUpper);
+      else joinable = false;
+      if (joinable && para.length <= 12 && endsSentence) joinable = false;
+
       if (joinable) para += ' ' + text;
       else { flushPara(); para = text; }
       prev = line;
     });
     flushPara();
 
-    var md = blocks.join('\n\n');
+    var md = '';
+    for (var bi = 0; bi < blocks.length; bi++) {
+      var b = blocks[bi];
+      if (!md) {
+        md = b;
+      } else {
+        var prevIsList = /^\s*[-*]\s+/.test(blocks[bi - 1]);
+        var curIsList = /^\s*[-*]\s+/.test(b);
+        if (prevIsList && curIsList) {
+          md += '\n' + b;
+        } else {
+          md += '\n\n' + b;
+        }
+      }
+    }
     // Re-join words broken across lines with a hyphen.
     md = md.replace(/([a-z])-\n([a-z])/g, '$1$2');
     return U.collapseBlankLines(md);
@@ -907,5 +1098,5 @@
 
   D2A.converters = D2A.converters || {};
   D2A.converters.pdf = convert;
-  D2A.pdf = { PdfDoc: PdfDoc, parseCMap: parseCMap };
+  D2A.pdf = { PdfDoc: PdfDoc, parseCMap: parseCMap, extractPageText: extractPageText, linesToMarkdown: linesToMarkdown };
 })(typeof globalThis !== 'undefined' ? globalThis : this);
