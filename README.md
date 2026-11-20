@@ -6,6 +6,8 @@
 
 **Turn any document into an AI-ready file — in one click, in your browser.**
 
+**Live demo: [doc2ai.vercel.app](https://doc2ai.vercel.app)** — nothing is uploaded; the conversion runs in your tab.
+
 AI agents can read text, not `.docx` archives, PDF streams or spreadsheet XML. doc2ai converts whatever you drop on it into clean, structured **Markdown** with a machine-readable **manifest**, so an agent can open the output directly and skip the "I can't parse this attachment" round trip.
 
 Everything runs locally in the browser tab. No uploads, no accounts, no server, no dependencies.
