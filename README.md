@@ -1,0 +1,163 @@
+﻿# doc2ai
+
+**Turn any document into an AI-ready file â€” in one click, in your browser.**
+
+AI agents can read text, not `.docx` archives, PDF streams or spreadsheet XML. doc2ai converts whatever you drop on it into clean, structured **Markdown** with a machine-readable **manifest**, so an agent can open the output directly and skip the "I can't parse this attachment" round trip.
+
+Everything runs locally in the browser tab. No uploads, no accounts, no server, no dependencies.
+
+```
+document.docx / .pdf / .xlsx / .pptx / .odt / .epub / .html / .csv / â€¦
+        â†“  doc2ai
+report.ai.md      â† Markdown with YAML front-matter (structure, word count, tokens)
+manifest.ai.json  â† index of every document: format, size, structure, warnings
+bundle.ai.md      â† all documents concatenated into one file for a single prompt
+```
+
+---
+
+## Quick start
+
+| How | What to do |
+| --- | --- |
+| **Windows** | Double-click `start.bat` â€” it starts a local server (PHP or Python) and opens the app. |
+| **Any OS** | Open `index.html` in Chrome, Edge, Firefox or Safari. The app works from the file system too. |
+| **Hosted** | Deploy the folder to any static host (Vercel, Netlify, GitHub Pages) â€” it is plain HTML/CSS/JS. |
+
+Then: drop files or folders â†’ press **Convert** â†’ copy or download the `.ai.md` files.
+
+## Supported input
+
+| Category | Formats |
+| --- | --- |
+| Documents | `.docx` `.docm` `.dotx` (Word), `.odt` (OpenDocument), `.rtf`, `.txt`, `.md` |
+| PDF | `.pdf` â€” selectable text, headings, lists, multi-page |
+| Spreadsheets | `.xlsx` `.xlsm` (Excel), `.ods`, `.csv`, `.tsv` |
+| Presentations | `.pptx` `.ppsx` (PowerPoint, incl. speaker notes), `.odp` |
+| Web | `.html` `.htm` `.xhtml`, `.epub` |
+| Data | `.json` `.geojson` `.ipynb`, `.xml` `.yaml` `.toml` `.ini` `.env` |
+| E-mail | `.eml` |
+| Code | 100+ extensions â€” `.js` `.ts` `.py` `.php` `.java` `.cs` `.go` `.rs` `.sql` `.sh` `.ps1` â€¦ |
+| Archives | `.zip` containing any of the above |
+| Legacy (best effort) | `.doc` `.xls` `.ppt` |
+| Images | `.png` `.jpg` `.svg` â€¦ â€” metadata only, no OCR |
+
+`.docx`, `.xlsx` and `.pptx` are detected by content, not just by extension, so mislabelled files still convert.
+
+## What the output looks like
+
+```markdown
+---
+ai_ready: true
+generator: "doc2ai"
+schema: "doc2ai/document@1"
+source: "reports/q3.docx"
+format: "docx"
+converted: "2026-11-20T16:29:57+05:30"
+title: "Quarterly Operations Report"
+words: 812
+tokens_est: 1100
+source_bytes: 48213
+structure:
+  paragraphs: 96
+  headings: 14
+  tables: 3
+  listItems: 22
+---
+
+# Quarterly Operations Report
+
+## Overview
+
+Revenue grew **18%** year over year, driven by *new markets*.
+
+| Region | Revenue | Growth |
+| --- | --- | --- |
+| North | 1.2M | 22% |
+```
+
+Headings, bold/italic, lists (bullet and numbered), tables, footnotes, speaker notes and page markers are preserved as Markdown. The front-matter tells an agent what the document is, how big it is and how it is structured before it reads a single line.
+
+The **manifest** (`manifest.ai.json`) is the index for agents that need to pick the right file:
+
+```json
+{
+  "schema": "doc2ai/manifest@1",
+  "summary": { "documents": 8, "failed": 0, "words": 168, "tokens_est": 313 },
+  "documents": [
+    { "source": "q3.docx", "output": "q3.ai.md", "format": "docx", "tokens_est": 79,
+      "structure": { "paragraphs": 96, "headings": 14, "tables": 3 } }
+  ]
+}
+```
+
+The **bundle** (`bundle.ai.md`) is every converted document in one file, with a table of contents â€” paste it into any chat or point a single-file agent at it.
+
+## Features
+
+- **Batch and folders** â€” drop a whole directory tree; the relative paths are kept in the output names.
+- **Nothing leaves the machine** â€” all parsing happens in the tab. Works offline after the page loads.
+- **No dependencies** â€” no CDN, no npm packages, no build step, no server-side code. ~4,000 lines of vanilla JS.
+- **Real parsers, not text scraping** â€” ZIP/OOXML/ODF container reading, PDF object + object-stream parsing with `ToUnicode` CMaps, XML tree parsing.
+- **Honest output** â€” every document carries warnings when something was approximated (scanned PDF, embedded images, legacy formats, truncated sheets).
+- **Download options** â€” single file, bundle, manifest, or everything as one ZIP.
+
+## Project layout
+
+```
+doc2ai/
+â”œâ”€â”€ index.html              # the app
+â”œâ”€â”€ start.bat               # local launcher (PHP or Python)
+â”œâ”€â”€ assets/
+â”‚   â”œâ”€â”€ app.js              # UI controller: queue, conversion, results
+â”‚   â”œâ”€â”€ css/app.css         # theme (dark + light)
+â”‚   â””â”€â”€ lib/
+â”‚       â”œâ”€â”€ zip.js          # ZIP reader (inflate) + writer (store)
+â”‚       â”œâ”€â”€ xml.js          # small namespace-aware XML parser
+â”‚       â”œâ”€â”€ docx.js         # WordprocessingML â†’ Markdown
+â”‚       â”œâ”€â”€ xlsx.js         # SpreadsheetML â†’ Markdown tables (incl. dates, formulas)
+â”‚       â”œâ”€â”€ pptx.js         # PresentationML â†’ Markdown (incl. notes)
+â”‚       â”œâ”€â”€ odf.js          # ODT / ODS / ODP
+â”‚       â”œâ”€â”€ pdf.js          # PDF text extraction (objects, ObjStm, CMaps, content streams)
+â”‚       â”œâ”€â”€ html.js         # HTML â†’ Markdown
+â”‚       â”œâ”€â”€ text.js         # text, Markdown, CSV/TSV, JSON, code, notebooks, e-mail
+â”‚       â”œâ”€â”€ rtf.js          # RTF
+â”‚       â””â”€â”€ convert.js      # dispatcher, front-matter, manifest, bundle, ZIP output
+â”œâ”€â”€ samples/                # sample documents to try
+â””â”€â”€ tests/selftest.cjs      # builds documents in memory and converts them
+```
+
+## Tests
+
+```bash
+node tests/selftest.cjs            # 17 checks: docx, xlsx, pptx, pdf, odt, csv, json, html, rtf, ipynb, eml, bundle, manifest, zip
+node tests/selftest.cjs --dump     # also print every converted document
+node tests/selftest.cjs --write-samples   # regenerate samples/
+```
+
+The suite builds real OOXML/ODF/PDF files in memory (including a deflate-compressed PDF), converts them, asserts on the Markdown, then round-trips the output ZIP.
+
+## Deploy
+
+**Vercel:** import the repository and deploy with the default settings â€” it is a static site, no build command, no framework preset.
+
+**GitHub Pages:** push the repository, then *Settings â†’ Pages â†’ Deploy from branch â†’ main / root*.
+
+**Netlify / Cloudflare Pages:** drag the folder in, or connect the repo with an empty build command and `.` as the publish directory.
+
+## Limitations
+
+- **No OCR.** Scanned PDFs and images have no text layer; doc2ai says so instead of inventing content.
+- **Images inside documents** are marked with `[image]` but not described.
+- **PDF layout** is reconstructed from text positions; complex multi-column or magazine layouts may read out of order.
+- **Legacy `.doc/.xls/.ppt`** use a best-effort text recovery â€” re-save as the modern format for a faithful conversion.
+- **Encrypted files** cannot be read without the password.
+- **Very large sheets** are truncated (3,000 rows / 80 columns per sheet) to keep output usable by an LLM.
+
+## Privacy
+
+Files are read with the browser's File API and parsed in memory. Nothing is sent anywhere; the page makes no network requests at all after loading.
+
+## License
+
+MIT
